@@ -1,0 +1,6 @@
+<Files ".env">
+  Require all denied
+</Files>
+<FilesMatch "\.(sqlite|sqlite3|db)$">
+  Require all denied
+</FilesMatch>
