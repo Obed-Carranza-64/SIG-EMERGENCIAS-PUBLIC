@@ -1,4 +1,11 @@
 <?php
+require_once __DIR__ . '/includes/sismos.php';
+if (sismos_autosync()) {
+    try {
+        sincronizar_sismos(false, 4);
+    } catch (Throwable $e) {
+    }
+}
 require_once __DIR__ . '/includes/data.php';
 require_once __DIR__ . '/includes/mesh.php';
 require_once __DIR__ . '/includes/risk.php';
@@ -122,16 +129,19 @@ require __DIR__ . '/includes/header.php';
     <div class="panel">
       <div class="panel-head">
         <h3><i class="fa-solid fa-bell"></i> Alertas en tiempo real</h3>
-        <span class="badge alta">3 nuevas</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="chip"><span class="dot-g"></span> En vivo</span>
+          <span class="badge alta" id="alertNewBadge" style="display:none">0 nuevas</span>
+        </div>
       </div>
       <div class="tabs" id="alertTabs" style="margin-bottom:12px">
         <button class="tab is-active" type="button" data-anivel="all">Todo</button>
         <button class="tab" type="button" data-anivel="alta">Emergencias</button>
         <button class="tab" type="button" data-anivel="info">Información</button>
       </div>
-      <div class="list">
+      <div class="list" id="alertList">
         <?php foreach ($ALERTAS as $al): ?>
-          <a class="row js-alerta" data-nivel="<?= $al['nivel'] ?>" href="reportes.php?alerta=<?= (int)($al['id'] ?? 0) ?>">
+          <a class="row js-alerta" data-nivel="<?= $al['nivel'] ?>" data-alerta-id="<?= (int)($al['id'] ?? 0) ?>" href="reportes.php?alerta=<?= (int)($al['id'] ?? 0) ?>">
             <div class="ic <?= $al['nivel'] === 'baja' ? 'green' : ($al['nivel'] === 'media' ? 'amber' : 'red') ?>"><i class="fa-solid <?= htmlspecialchars($al['icon']) ?>"></i></div>
             <div class="txt"><strong><?= htmlspecialchars($al['tipo']) ?></strong><small><i class="fa-solid fa-location-dot"></i> <?= htmlspecialchars($al['lugar']) ?></small></div>
             <span class="time"><?= htmlspecialchars($al['tiempo']) ?></span>
@@ -204,6 +214,9 @@ require __DIR__ . '/includes/header.php';
 
 <script>
 window.MAP_ID = 'mapCalor';
+window.SISMOS_LIVE = true;
+window.SISMOS_URL = 'api/sismos.php';
+window.SISMOS_POLL = 90000;
 window.GEO = <?= json_encode($geo, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 window.MAP_TARGET = <?= $target ? json_encode($target, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null' ?>;
 </script>

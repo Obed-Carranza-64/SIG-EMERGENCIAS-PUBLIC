@@ -43,21 +43,27 @@ try {
         }
     }
 
-    $conteo = conteo_reportes();
+    $lista_reportes = ultimos_reportes(10);
+    $conteo = ['todos' => 0, 'nuevo' => 0, 'revision' => 0, 'atencion' => 0, 'resuelto' => 0];
+    foreach ($lista_reportes as $rr) {
+        $conteo['todos']++;
+        $kk = estado_key($rr['estado']);
+        if (isset($conteo[$kk])) {
+            $conteo[$kk]++;
+        }
+    }
     $ver = isset($_GET['ver']) ? (int) $_GET['ver'] : 0;
     $destacado = $ver > 0 ? obtener_reporte($ver) : null;
     if (!$destacado) {
         $destacado = reporte_destacado();
     }
 
-    $sismos_total = contar_alertas_externas();
-    $sismos_estado = sync_state_get('sismos');
-    $sismos_actualizado = $sismos_estado['actualizado'] ?? null;
-
     $geo = ['reportes' => geo_reportes(), 'alertas' => geo_alertas(), 'albergues' => geo_albergues()];
     $mesh_g = mesh_grafo();
     $geo['nodos'] = $mesh_g['nodos'];
     $geo['enlaces'] = $mesh_g['enlaces'];
+
+    $ultimas_alertas = ultimas_alertas(10);
 
     $target = null;
     if (isset($_GET['alerta'])) {
@@ -74,14 +80,14 @@ try {
     }
 } catch (Throwable $e) {
     $conteo = ['todos' => 0, 'nuevo' => 0, 'revision' => 0, 'atencion' => 0, 'resuelto' => 0];
+    $lista_reportes = [];
     $destacado = null;
-    $sismos_total = 0;
-    $sismos_actualizado = null;
     $geo = ['reportes' => [], 'alertas' => [], 'albergues' => [], 'nodos' => [], 'enlaces' => []];
     $target = null;
+    $ultimas_alertas = [];
 }
-if (!$destacado && !empty($REPORTES)) {
-    $destacado = $REPORTES[0] + ['id' => 0, 'lat' => null, 'lon' => null];
+if (!$destacado && !empty($lista_reportes)) {
+    $destacado = $lista_reportes[0] + ['id' => 0, 'lat' => null, 'lon' => null];
 }
 $imagenes = [];
 if (!empty($destacado['id'])) {
@@ -122,20 +128,6 @@ require __DIR__ . '/includes/header.php';
         </div>
       <?php endforeach; ?>
     </div>
-    <div class="panel">
-      <div class="panel-head"><h3><i class="fa-solid fa-house-crack"></i> Sismos (MARN)</h3><span class="chip"><span class="dot-g"></span> SNET</span></div>
-      <div class="layer">
-        <span><?= (int) $sismos_total ?> eventos monitoreados</span>
-        <span class="chip">API</span>
-      </div>
-      <?php if ($sismos_actualizado): ?>
-        <?php $ts_sync = strtotime($sismos_actualizado); ?>
-        <div class="meta-row" style="margin-top:8px"><i class="fa-solid fa-rotate"></i> Última sincronización: <?= htmlspecialchars($ts_sync ? date('d/m/Y H:i', $ts_sync) : $sismos_actualizado) ?></div>
-      <?php else: ?>
-        <div class="meta-row" style="margin-top:8px"><i class="fa-solid fa-circle-info"></i> Sin sincronizar todavía.</div>
-      <?php endif; ?>
-      <a class="btn btn-ghost btn-block" style="margin-top:12px" href="sync_sismos.php?volver=reportes.php"><i class="fa-solid fa-rotate"></i> Actualizar sismos</a>
-    </div>
     <div class="panel" style="background:linear-gradient(180deg,rgba(226,31,46,.16),var(--panel-2));border-color:rgba(255,45,63,.3)">
       <div style="display:flex;gap:12px">
         <div class="ic red" style="width:40px;height:40px;border-radius:11px;display:grid;place-items:center"><i class="fa-solid fa-shield-heart"></i></div>
@@ -147,49 +139,39 @@ require __DIR__ . '/includes/header.php';
 
   <div class="stack">
     <div class="panel">
-      <div class="panel-head" style="margin-bottom:6px">
+      <div class="panel-head" style="margin-bottom:0">
         <div>
           <h3 style="font-size:20px"><i class="fa-solid fa-bullhorn"></i> Reportes Ciudadanos</h3>
           <span style="color:var(--muted);font-size:12.5px">Información en tiempo real de la comunidad</span>
         </div>
-        <div style="display:flex;gap:10px;align-items:center">
-          <div class="input-icon"><i class="fa-solid fa-magnifying-glass"></i><input type="text" data-search=".js-report" placeholder="Buscar por ubicación, tipo de evento o palabra clave..."></div>
-          <details class="filter-dd">
-            <summary class="btn btn-ghost btn-sm"><i class="fa-solid fa-filter"></i> Filtros</summary>
-            <div class="filter-panel">
-              <label><input type="checkbox" class="js-estado" value="nuevo" checked> Nuevo</label>
-              <label><input type="checkbox" class="js-estado" value="revision" checked> En revisión</label>
-              <label><input type="checkbox" class="js-estado" value="atencion" checked> En atención</label>
-              <label><input type="checkbox" class="js-estado" value="resuelto" checked> Resueltos</label>
-            </div>
-          </details>
-        </div>
-      </div>
-      <div class="tabs" id="reportTabs">
-        <button class="tab is-active" data-filter="todos">Todos <span class="count"><?= $conteo['todos'] ?></span></button>
-        <button class="tab" data-filter="revision">En revisión <span class="count"><?= $conteo['revision'] ?></span></button>
-        <button class="tab" data-filter="atencion">En atención <span class="count"><?= $conteo['atencion'] ?></span></button>
-        <button class="tab" data-filter="resuelto">Resueltos <span class="count"><?= $conteo['resuelto'] ?></span></button>
+        <span class="chip"><span class="dot-g"></span> En vivo</span>
       </div>
     </div>
 
     <div class="grid cols-report">
-      <div class="stack">
-        <?php foreach ($REPORTES as $r): ?>
-          <?php $k = estado_key($r['estado']); ?>
-          <a class="row js-report <?= (int)($r['id'] ?? 0) === (int)($destacado['id'] ?? -1) ? 'is-selected' : '' ?>" data-estado="<?= $k ?>" href="reportes.php?ver=<?= (int)($r['id'] ?? 0) ?>">
-            <div class="ic red"><i class="fa-solid <?= htmlspecialchars($r['icon']) ?>"></i></div>
-            <div class="txt">
-              <strong><?= htmlspecialchars($r['titulo']) ?></strong>
-              <small><i class="fa-solid fa-location-dot"></i> <?= htmlspecialchars($r['lugar']) ?></small>
-              <div style="margin-top:6px"><span class="badge <?= $k ?>"><?= htmlspecialchars($r['estado']) ?></span> <span class="time"><?= htmlspecialchars($r['tiempo']) ?></span></div>
-            </div>
-            <i class="fa-solid fa-chevron-right" style="color:var(--muted-2)"></i>
-          </a>
-        <?php endforeach; ?>
+      <div class="panel" style="align-self:start">
+        <div class="panel-head">
+          <h3><i class="fa-solid fa-bell"></i> Últimas alertas</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="chip"><span class="dot-g"></span> En vivo</span>
+            <span class="badge alta" id="alertNewBadge" style="display:none">0 nuevas</span>
+          </div>
+        </div>
+        <div class="list" id="alertList" style="max-height:calc(100vh - 300px);min-height:220px;overflow:auto;padding-right:2px">
+          <?php foreach ($ultimas_alertas as $al): ?>
+            <a class="row js-alerta" data-nivel="<?= htmlspecialchars($al['nivel']) ?>" data-alerta-id="<?= (int)($al['id'] ?? 0) ?>" href="reportes.php?alerta=<?= (int)($al['id'] ?? 0) ?>">
+              <div class="ic <?= $al['nivel'] === 'baja' ? 'green' : ($al['nivel'] === 'media' ? 'amber' : 'red') ?>"><i class="fa-solid <?= htmlspecialchars($al['icon']) ?>"></i></div>
+              <div class="txt"><strong><?= htmlspecialchars($al['tipo']) ?></strong><small><i class="fa-solid fa-location-dot"></i> <?= htmlspecialchars($al['lugar']) ?></small></div>
+              <span class="time"><?= htmlspecialchars($al['tiempo']) ?></span>
+            </a>
+          <?php endforeach; ?>
+          <?php if (empty($ultimas_alertas)): ?>
+            <div class="empty"><i class="fa-solid fa-bell-slash"></i><span>Sin alertas recientes</span></div>
+          <?php endif; ?>
+        </div>
       </div>
 
-      <div class="map-wrap" style="grid-column:span 2;align-self:start;height:calc(100vh - 250px);min-height:520px">
+      <div class="map-wrap" style="align-self:start;height:calc(100vh - 220px);min-height:520px">
         <div id="mapReportes" class="map" style="min-height:520px"></div>
         <div class="map-search">
           <div class="input-icon">
@@ -250,13 +232,16 @@ require __DIR__ . '/includes/header.php';
         <?php if (!empty($destacado['lat']) && !empty($destacado['lon'])): ?>
           <a class="btn btn-ghost btn-block" style="margin-top:10px" href="reportes.php?ver=<?= (int)($destacado['id'] ?? 0) ?>"><i class="fa-solid fa-map"></i> Centrar en el mapa</a>
         <?php endif; ?>
-      </div>
+        </div>
     </div>
   </div>
 </div>
 
 <script>
 window.MAP_ID = 'mapReportes';
+window.SISMOS_LIVE = true;
+window.SISMOS_URL = 'api/sismos.php';
+window.SISMOS_POLL = 90000;
 window.GEO = <?= json_encode($geo, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 window.MAP_TARGET = <?= $target ? json_encode($target, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null' ?>;
 </script>

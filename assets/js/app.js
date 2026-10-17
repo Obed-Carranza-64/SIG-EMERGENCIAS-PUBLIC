@@ -530,6 +530,8 @@
 
     map._filtrable = filtrable;
     map._heatBase = geoHeatPoints(geo);
+    map._geoGroups = groups;
+    map._markerIndex = markerIndex;
     if (map._heatLayer && map._heatBase.length) { map._heatLayer.setLatLngs(map._heatBase); }
 
     document.querySelectorAll('.layer .switch input[data-layer]').forEach(function (sw) {
@@ -837,6 +839,111 @@
     });
   }
 
+  /* Actualización en vivo de sismos: consulta la API periódicamente y, sin que
+     el usuario haga nada, agrega los nuevos al mapa (si hay capa Sismos) y/o a
+     la lista de "Alertas en tiempo real". Notifica con un aviso emergente. */
+  function nivelClass(nivel) {
+    return nivel === 'baja' ? 'green' : (nivel === 'media' ? 'amber' : 'red');
+  }
+
+  function initSismosLive() {
+    if (!window.SISMOS_LIVE) return;
+
+    var map = MAPS[mainMapId()];
+    var group = map && map._geoGroups ? map._geoGroups.sismos : null;
+    var index = map && map._markerIndex ? map._markerIndex : {};
+    var list = document.getElementById('alertList');
+    var badge = document.getElementById('alertNewBadge');
+    var url = window.SISMOS_URL || 'api/sismos.php';
+    var interval = window.SISMOS_POLL || 90000;
+    var busy = false;
+    var totalNuevos = 0;
+
+    var known = {};
+    if (list) {
+      Array.prototype.forEach.call(list.querySelectorAll('[data-alerta-id]'), function (el) {
+        known[el.getAttribute('data-alerta-id')] = true;
+      });
+    }
+
+    function inFiltrable(mk) {
+      var f = map._filtrable || [];
+      for (var i = 0; i < f.length; i++) { if (f[i].m === mk) return true; }
+      return false;
+    }
+
+    function addMarker(s) {
+      if (!group || !map.hasLayer(group) || s.id === undefined || s.id === null) return false;
+      var key = 'alerta-' + s.id;
+      if (index[key]) return false;
+      var c = alertColor(s.nivel);
+      var mk = geoMarker(group, s.lat, s.lon, sigPin(s.icon, c), alertPopup(s, c));
+      if (!mk) return false;
+      index[key] = { m: mk, g: group };
+      if (map._filtrable && !inFiltrable(mk)) {
+        map._filtrable.push({ m: mk, lat: parseFloat(s.lat), lon: parseFloat(s.lon), group: group });
+      }
+      return true;
+    }
+
+    function addRow(s) {
+      if (!list || s.id === undefined || s.id === null) return false;
+      var id = String(s.id);
+      if (known[id]) return false;
+      var a = document.createElement('a');
+      a.className = 'row js-alerta';
+      a.setAttribute('data-nivel', s.nivel);
+      a.setAttribute('data-alerta-id', id);
+      a.href = 'reportes.php?alerta=' + encodeURIComponent(id);
+      a.innerHTML =
+        '<div class="ic ' + nivelClass(s.nivel) + '"><i class="fa-solid ' + esc(s.icon || 'fa-house-crack') + '"></i></div>' +
+        '<div class="txt"><strong>' + esc(s.tipo) + '</strong><small><i class="fa-solid fa-location-dot"></i> ' + esc(s.lugar) + '</small></div>' +
+        '<span class="time">' + esc(s.tiempo) + '</span>';
+      list.insertBefore(a, list.firstChild);
+      var rows = list.querySelectorAll('[data-alerta-id]');
+      for (var ri = 10; ri < rows.length; ri++) { list.removeChild(rows[ri]); }
+      known[id] = true;
+      if (totalNuevos === 0 && badge) { badge.style.display = ''; }
+      var active = document.querySelector('#alertTabs .tab.is-active');
+      if (active) {
+        var f = active.getAttribute('data-anivel');
+        var n = s.nivel;
+        var show = f === 'all' || (f === 'alta' ? n === 'alta' : (n === 'media' || n === 'baja'));
+        a.style.display = show ? '' : 'none';
+      }
+      return true;
+    }
+
+    function tick() {
+      if (busy || document.hidden) return;
+      busy = true;
+      fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          busy = false;
+          if (!data || !data.sismos || !data.sismos.length) return;
+          var nuevos = 0;
+          data.sismos.forEach(function (s) {
+            var added = addMarker(s);
+            if (addRow(s)) { added = true; totalNuevos++; }
+            if (added) { nuevos++; }
+          });
+          if (badge && totalNuevos > 0) {
+            badge.textContent = totalNuevos + (totalNuevos === 1 ? ' nueva' : ' nuevas');
+            badge.style.display = '';
+          }
+          if (nuevos > 0) {
+            showToast(nuevos === 1 ? 'Nuevo sismo detectado' : (nuevos + ' nuevos sismos detectados'), true);
+          }
+        })
+        .catch(function () { busy = false; });
+    }
+
+    setInterval(tick, interval);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { tick(); } });
+    setTimeout(tick, 1500);
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     initMaps();
     initOsmSearch();
@@ -853,6 +960,7 @@
     initMeshPage();
     initRadiusFilter();
     initUploadPreview();
+    initSismosLive();
   });
 
   function initMaps() {

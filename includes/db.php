@@ -80,6 +80,7 @@ function init_db() {
 
     seed_if_empty($pdo);
     migrar_coordenadas($pdo);
+    $pdo->exec("UPDATE alertas SET evento = datetime('now') WHERE evento IS NULL OR evento = ''");
     asegurar_capas($pdo);
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS nodos_mesh (
@@ -185,7 +186,7 @@ function seed_if_empty($pdo) {
         ['baja',  'Ruta habilitada',         'Carretera Panamericana',      'Hace 30 min', 'fa-road'],
         ['alta',  'Incendio forestal',       'Cerro Verde, Santa Ana',      'Hace 30 min', 'fa-fire'],
     ];
-    $st = $pdo->prepare("INSERT INTO alertas (nivel, tipo, lugar, tiempo, icon) VALUES (?, ?, ?, ?, ?)");
+    $st = $pdo->prepare("INSERT INTO alertas (nivel, tipo, lugar, tiempo, icon, evento) VALUES (?, ?, ?, ?, ?, datetime('now'))");
     foreach ($alertas as $a) { $st->execute($a); }
 
     $reportes = [
@@ -273,6 +274,14 @@ function obtener_reporte($id) {
     $st = db()->prepare("SELECT id, titulo, lugar, tiempo, estado, icon, lat, lon, descripcion AS \"desc\" FROM reportes WHERE id = ?");
     $st->execute([(int) $id]);
     return $st->fetch() ?: null;
+}
+
+function ultimos_reportes($limit = 10) {
+    $limit = max(1, min(100, (int) $limit));
+    $st = db()->prepare("SELECT id, titulo, lugar, tiempo, estado, icon, lat, lon, descripcion AS \"desc\" FROM reportes ORDER BY id DESC LIMIT ?");
+    $st->bindValue(1, $limit, PDO::PARAM_INT);
+    $st->execute();
+    return $st->fetchAll();
 }
 
 function crear_reporte($d) {
@@ -363,6 +372,18 @@ function geo_reportes() {
 
 function geo_alertas() {
     return db()->query("SELECT id, nivel, tipo, lugar, tiempo, icon, lat, lon, magnitud, profundidad, url, fuente, ref FROM alertas WHERE lat IS NOT NULL AND lon IS NOT NULL ORDER BY id")->fetchAll();
+}
+
+function ultimas_alertas($limit = 10) {
+    $limit = max(1, min(100, (int) $limit));
+    $st = db()->prepare("SELECT id, nivel, tipo, lugar, tiempo, icon FROM alertas ORDER BY COALESCE(NULLIF(evento, ''), '0000-00-00 00:00:00') DESC, id DESC LIMIT ?");
+    $st->bindValue(1, $limit, PDO::PARAM_INT);
+    $st->execute();
+    return $st->fetchAll();
+}
+
+function geo_sismos() {
+    return db()->query("SELECT id, nivel, tipo, lugar, tiempo, icon, lat, lon, magnitud, profundidad, url, fuente, ref FROM alertas WHERE ref IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL ORDER BY id")->fetchAll();
 }
 
 function alerta_por_ref($ref) {
