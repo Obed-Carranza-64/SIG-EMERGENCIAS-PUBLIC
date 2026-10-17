@@ -295,6 +295,7 @@
     t = (t || '').toLowerCase();
     if (t.indexOf('incendio') > -1) return 'incendios';
     if (t.indexOf('inund') > -1 || t.indexOf('lluvia') > -1) return 'inundaciones';
+    if (t.indexOf('sismo') > -1 || t.indexOf('terremoto') > -1) return 'sismos';
     return 'deslizamientos';
   }
 
@@ -329,6 +330,33 @@
 
   function popHead(fa, color, title) {
     return '<div class="pop-head"><i class="fa-solid ' + esc(fa) + '" style="color:' + color + '"></i><strong>' + esc(title) + '</strong></div>';
+  }
+
+  function hasNum(v) {
+    return v !== null && v !== undefined && v !== '' && !isNaN(parseFloat(v));
+  }
+
+  function oneDecimal(v) {
+    return Math.round(parseFloat(v) * 10) / 10;
+  }
+
+  function alertPopup(a, color) {
+    var html = popHead(a.icon || 'fa-triangle-exclamation', color, a.tipo);
+    html += esc(a.lugar) + '<br><small>' + esc(a.tiempo);
+    if (hasNum(a.magnitud)) {
+      html += ' · M ' + oneDecimal(a.magnitud);
+      if (hasNum(a.profundidad)) {
+        html += ' · prof ' + oneDecimal(a.profundidad) + ' km';
+      }
+    }
+    html += ' · riesgo ' + riskValue(a.tipo) + '</small>';
+    if (a.fuente) {
+      html += '<br><small>Fuente: ' + esc(a.fuente) + '</small>';
+    }
+    if (a.url) {
+      html += '<br><a class="pop-link" href="' + esc(a.url) + '" target="_blank" rel="noopener">Ver reporte oficial</a>';
+    }
+    return html;
   }
 
   function geoMarker(group, lat, lon, icon, popup) {
@@ -457,6 +485,7 @@
       incendios: L.layerGroup(),
       inundaciones: L.layerGroup(),
       deslizamientos: L.layerGroup(),
+      sismos: L.layerGroup(),
       red: L.layerGroup(),
       recursos: L.layerGroup(),
       limites: L.layerGroup()
@@ -476,8 +505,7 @@
     (geo.alertas || []).forEach(function (a) {
       var g = groups[tipoKey(a.tipo)];
       var c = alertColor(a.nivel);
-      var mk = geoMarker(g, a.lat, a.lon, sigPin(a.icon, c),
-        popHead(a.icon || 'fa-triangle-exclamation', c, a.tipo) + esc(a.lugar) + '<br><small>' + esc(a.tiempo) + ' · riesgo ' + riskValue(a.tipo) + '</small>');
+      var mk = geoMarker(g, a.lat, a.lon, sigPin(a.icon, c), alertPopup(a, c));
       if (mk && a.id !== undefined && a.id !== null) { markerIndex['alerta-' + a.id] = { m: mk, g: g }; }
       keep(mk, g, a);
     });
@@ -789,6 +817,26 @@
     });
   }
 
+  function initUploadPreview() {
+    var input = document.getElementById('fImgs');
+    var box = document.getElementById('imgPreview');
+    if (!input || !box) return;
+    input.addEventListener('change', function () {
+      box.innerHTML = '';
+      var files = input.files || [];
+      for (var i = 0; i < files.length; i++) {
+        if (!/^image\//.test(files[i].type)) continue;
+        var d = document.createElement('div');
+        d.className = 'thumb-prev';
+        var img = document.createElement('img');
+        img.src = URL.createObjectURL(files[i]);
+        img.onload = function () { URL.revokeObjectURL(this.src); };
+        d.appendChild(img);
+        box.appendChild(d);
+      }
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     initMaps();
     initOsmSearch();
@@ -804,6 +852,7 @@
     initPicker();
     initMeshPage();
     initRadiusFilter();
+    initUploadPreview();
   });
 
   function initMaps() {

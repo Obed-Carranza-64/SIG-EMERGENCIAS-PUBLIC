@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/data.php';
 require_once __DIR__ . '/includes/mesh.php';
+require_once __DIR__ . '/includes/sismos.php';
 
 function estado_key($e) {
     return ['Nuevo' => 'nuevo', 'En revisión' => 'revision', 'En atención' => 'atencion', 'Resuelto' => 'resuelto'][$e] ?? 'nuevo';
@@ -28,18 +29,30 @@ $CAPA_KEYS = [
     'Incendios forestales' => 'incendios',
     'Inundaciones' => 'inundaciones',
     'Deslizamientos' => 'deslizamientos',
+    'Sismos' => 'sismos',
     'Red de comunicación' => 'red',
     'Recursos y albergues' => 'recursos',
     'Límites territoriales' => 'limites',
 ];
 
 try {
+    if (sismos_autosync()) {
+        try {
+            sincronizar_sismos(false, 4);
+        } catch (Throwable $e) {
+        }
+    }
+
     $conteo = conteo_reportes();
     $ver = isset($_GET['ver']) ? (int) $_GET['ver'] : 0;
     $destacado = $ver > 0 ? obtener_reporte($ver) : null;
     if (!$destacado) {
         $destacado = reporte_destacado();
     }
+
+    $sismos_total = contar_alertas_externas();
+    $sismos_estado = sync_state_get('sismos');
+    $sismos_actualizado = $sismos_estado['actualizado'] ?? null;
 
     $geo = ['reportes' => geo_reportes(), 'alertas' => geo_alertas(), 'albergues' => geo_albergues()];
     $mesh_g = mesh_grafo();
@@ -62,11 +75,21 @@ try {
 } catch (Throwable $e) {
     $conteo = ['todos' => 0, 'nuevo' => 0, 'revision' => 0, 'atencion' => 0, 'resuelto' => 0];
     $destacado = null;
+    $sismos_total = 0;
+    $sismos_actualizado = null;
     $geo = ['reportes' => [], 'alertas' => [], 'albergues' => [], 'nodos' => [], 'enlaces' => []];
     $target = null;
 }
 if (!$destacado && !empty($REPORTES)) {
     $destacado = $REPORTES[0] + ['id' => 0, 'lat' => null, 'lon' => null];
+}
+$imagenes = [];
+if (!empty($destacado['id'])) {
+    try {
+        $imagenes = imagenes_reporte($destacado['id']);
+    } catch (Throwable $e) {
+        $imagenes = [];
+    }
 }
 $dest_badge = estado_key($destacado['estado'] ?? 'Nuevo');
 $estados_btn = ['En revisión', 'En atención', 'Resuelto'];
@@ -98,6 +121,20 @@ require __DIR__ . '/includes/header.php';
           </label>
         </div>
       <?php endforeach; ?>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3><i class="fa-solid fa-house-crack"></i> Sismos (MARN)</h3><span class="chip"><span class="dot-g"></span> SNET</span></div>
+      <div class="layer">
+        <span><?= (int) $sismos_total ?> eventos monitoreados</span>
+        <span class="chip">API</span>
+      </div>
+      <?php if ($sismos_actualizado): ?>
+        <?php $ts_sync = strtotime($sismos_actualizado); ?>
+        <div class="meta-row" style="margin-top:8px"><i class="fa-solid fa-rotate"></i> Última sincronización: <?= htmlspecialchars($ts_sync ? date('d/m/Y H:i', $ts_sync) : $sismos_actualizado) ?></div>
+      <?php else: ?>
+        <div class="meta-row" style="margin-top:8px"><i class="fa-solid fa-circle-info"></i> Sin sincronizar todavía.</div>
+      <?php endif; ?>
+      <a class="btn btn-ghost btn-block" style="margin-top:12px" href="sync_sismos.php?volver=reportes.php"><i class="fa-solid fa-rotate"></i> Actualizar sismos</a>
     </div>
     <div class="panel" style="background:linear-gradient(180deg,rgba(226,31,46,.16),var(--panel-2));border-color:rgba(255,45,63,.3)">
       <div style="display:flex;gap:12px">
@@ -182,12 +219,18 @@ require __DIR__ . '/includes/header.php';
         </div>
         <div class="meta-row" style="margin:12px 0 0"><i class="fa-solid fa-clock"></i> <?= htmlspecialchars($destacado['tiempo']) ?></div>
         <p style="color:var(--muted);font-size:12.5px;margin:10px 0 14px"><?= htmlspecialchars($destacado['desc']) ?></p>
-        <div class="meta-row" style="margin-bottom:6px"><i class="fa-solid fa-image"></i> Imágenes adjuntas (3)</div>
-        <div class="thumbs">
-          <div class="t"><i class="fa-solid fa-image"></i></div>
-          <div class="t"><i class="fa-solid fa-image"></i></div>
-          <div class="t"><i class="fa-solid fa-image"></i></div>
-        </div>
+        <div class="meta-row" style="margin-bottom:6px"><i class="fa-solid fa-image"></i> Imágenes adjuntas (<?= count($imagenes) ?>)</div>
+        <?php if ($imagenes): ?>
+          <div class="thumbs">
+            <?php foreach ($imagenes as $im): ?>
+              <a class="t" href="<?= htmlspecialchars(upload_url($im['archivo'])) ?>" target="_blank" rel="noopener" title="Adjuntada <?= htmlspecialchars($im['creado']) ?>">
+                <img src="<?= htmlspecialchars(upload_url($im['archivo'])) ?>" alt="Imagen adjunta del reporte" loading="lazy">
+              </a>
+            <?php endforeach; ?>
+          </div>
+        <?php else: ?>
+          <div class="meta-row" style="color:var(--muted)"><i class="fa-solid fa-image"></i> Sin imágenes adjuntas.</div>
+        <?php endif; ?>
         <div class="meta-row" style="margin:16px 0 10px;justify-content:space-between">
           <span><i class="fa-solid fa-user-shield"></i> Reportado por: Ciudadano anónimo</span>
         </div>

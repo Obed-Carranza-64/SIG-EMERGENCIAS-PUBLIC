@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/data.php';
+require_once __DIR__ . '/includes/uploads.php';
 $active = 'reportes';
 $page_title = 'Reportar emergencia';
 
@@ -32,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         try {
             init_db();
-            crear_reporte([
+            $rid = crear_reporte([
                 'titulo' => $old['tipo'],
                 'lugar' => $old['lugar'],
                 'descripcion' => $old['descripcion'],
@@ -40,7 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'lat' => $old['lat'],
                 'lon' => $old['lon'],
             ]);
-            header('Location: reportes.php?ok=creado');
+            $subida = subir_imagenes($rid, $_FILES['imagenes'] ?? null);
+            header('Location: reportes.php?ok=' . ($subida['errores'] ? 'creado_imgerr' : 'creado'));
             exit;
         } catch (Throwable $e) {
             $error = 'No se pudo guardar el reporte. Intenta de nuevo.';
@@ -54,7 +56,7 @@ require __DIR__ . '/includes/header.php';
 <div class="section-label" style="margin-top:4px"><i class="fa-solid fa-triangle-exclamation"></i> Nuevo reporte ciudadano</div>
 
 <div class="grid" style="grid-template-columns:1fr 1.2fr;">
-  <form class="panel" method="post" action="reportar.php">
+  <form class="panel" method="post" action="reportar.php" enctype="multipart/form-data">
     <div class="panel-head"><h3><i class="fa-solid fa-bullhorn"></i> Describe la emergencia</h3></div>
 
     <?php if ($error): ?>
@@ -80,6 +82,15 @@ require __DIR__ . '/includes/header.php';
       <label for="fDesc">Descripción</label>
       <textarea id="fDesc" name="descripcion" rows="4" maxlength="1000" required
                 placeholder="¿Qué ocurre? ¿Hay personas afectadas? ¿Vías bloqueadas?"><?= htmlspecialchars($old['descripcion']) ?></textarea>
+    </div>
+
+    <div class="field">
+      <label for="fImgs">Imágenes adjuntas (opcional)</label>
+      <input id="fImgs" type="file" name="imagenes[]" accept="image/*" multiple>
+      <small style="color:var(--muted);font-size:11.5px">
+        JPG, PNG, WEBP o GIF · hasta <?= (int) env('UPLOAD_MAX_FILES', 5) ?> imágenes · máx <?= (int) env('UPLOAD_MAX_MB', 6) ?> MB c/u
+      </small>
+      <div class="img-preview" id="imgPreview"></div>
     </div>
 
     <input type="hidden" id="fLat" name="lat" value="<?= htmlspecialchars($old['lat']) ?>">

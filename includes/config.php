@@ -60,6 +60,44 @@ function db_file() {
     return project_root() . '/' . ltrim($p, '/');
 }
 
+function upload_dir() {
+    $p = env('UPLOAD_DIR', 'C:/xampp/htdocs/temp');
+    $p = str_replace('\\', '/', $p);
+    if (!preg_match('#^([a-zA-Z]:/|/)#', $p)) {
+        $p = project_root() . '/' . ltrim($p, '/');
+    }
+    return rtrim($p, '/');
+}
+
+function upload_url($archivo = '') {
+    $base = rtrim(env('UPLOAD_URL', '/temp'), '/');
+    return $archivo === '' ? $base : $base . '/' . rawurlencode($archivo);
+}
+
+function sismos_url() {
+    return env('SISMOS_URL', 'https://sismia.onrender.com/api/sismos');
+}
+
+function sismos_icon() {
+    return env('SISMOS_ICON', 'fa-house-crack');
+}
+
+function sismos_ttl() {
+    return max(0, (int) env('SISMOS_TTL', 900));
+}
+
+function sismos_timeout() {
+    return max(1, (int) env('SISMOS_TIMEOUT', 8));
+}
+
+function sismos_autosync() {
+    return env('SISMOS_AUTOSYNC', '1') !== '0';
+}
+
+function sismos_keep_days() {
+    return max(1, (int) env('SISMOS_KEEP_DAYS', 30));
+}
+
 function sig_config() {
     return [
         'tileUrl' => env('TILE_URL', 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'),

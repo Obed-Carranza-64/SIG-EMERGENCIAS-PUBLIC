@@ -17,6 +17,7 @@
 <?php
 $TOASTS = [
     'creado' => ['ok' => true, 'msg' => 'Reporte registrado correctamente.'],
+    'creado_imgerr' => ['ok' => false, 'msg' => 'Reporte registrado, pero algunas imágenes no se pudieron adjuntar.'],
     'estado' => ['ok' => true, 'msg' => 'Estado del reporte actualizado.'],
     'kit' => ['ok' => true, 'msg' => 'Kit registrado correctamente.'],
     'asignado' => ['ok' => true, 'msg' => 'Kit asignado (En uso).'],
@@ -28,6 +29,13 @@ if (isset($_GET['ok']) && isset($TOASTS[$_GET['ok']])) {
     $toast = $TOASTS[$_GET['ok']];
 } elseif (isset($_GET['err'])) {
     $toast = ['ok' => false, 'msg' => 'Ocurrió un error. Intenta de nuevo.'];
+} elseif (isset($_GET['sismos'])) {
+    $n = (int) $_GET['sismos'];
+    if ($n < 0) {
+        $toast = ['ok' => false, 'msg' => 'No se pudieron actualizar los sismos. Intenta de nuevo.'];
+    } else {
+        $toast = ['ok' => true, 'msg' => $n === 0 ? 'Sismos actualizados (sin novedades).' : ('Sismos actualizados: ' . $n . ' eventos obtenidos.')];
+    }
 }
 ?>
 <?php if ($toast): ?>

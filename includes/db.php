@@ -59,14 +59,28 @@ function init_db() {
         estado TEXT NOT NULL DEFAULT 'Disponible'
     )");
 
+    $pdo->exec("CREATE TABLE IF NOT EXISTS reporte_imagenes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reporte_id INTEGER NOT NULL,
+        archivo TEXT NOT NULL,
+        creado TEXT NOT NULL
+    )");
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS capas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
         activa INTEGER NOT NULL DEFAULT 1
     )");
 
+    $pdo->exec("CREATE TABLE IF NOT EXISTS sync_state (
+        nombre TEXT PRIMARY KEY,
+        valor TEXT NOT NULL,
+        actualizado TEXT NOT NULL
+    )");
+
     seed_if_empty($pdo);
     migrar_coordenadas($pdo);
+    asegurar_capas($pdo);
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS nodos_mesh (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,8 +126,16 @@ function migrar_coordenadas($pdo) {
     ensure_column($pdo, 'reportes', 'lon', 'REAL');
     ensure_column($pdo, 'alertas', 'lat', 'REAL');
     ensure_column($pdo, 'alertas', 'lon', 'REAL');
+    ensure_column($pdo, 'alertas', 'ref', 'TEXT');
+    ensure_column($pdo, 'alertas', 'magnitud', 'REAL');
+    ensure_column($pdo, 'alertas', 'profundidad', 'REAL');
+    ensure_column($pdo, 'alertas', 'url', 'TEXT');
+    ensure_column($pdo, 'alertas', 'fuente', 'TEXT');
+    ensure_column($pdo, 'alertas', 'evento', 'TEXT');
     ensure_column($pdo, 'albergues', 'lat', 'REAL');
     ensure_column($pdo, 'albergues', 'lon', 'REAL');
+
+    $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_alertas_ref ON alertas(ref)");
 
     $coords_reportes = [
         1 => [13.4833, -88.1833], 2 => [13.6768, -89.2903],
@@ -136,6 +158,17 @@ function migrar_coordenadas($pdo) {
         $st = $pdo->prepare("UPDATE " . $tabla . " SET lat = ?, lon = ? WHERE id = ? AND lat IS NULL");
         foreach ($coords as $id => $ll) {
             $st->execute([$ll[0], $ll[1], $id]);
+        }
+    }
+}
+
+function asegurar_capas($pdo) {
+    foreach (['Sismos'] as $nombre) {
+        $st = $pdo->prepare("SELECT COUNT(*) FROM capas WHERE nombre = ?");
+        $st->execute([$nombre]);
+        if ((int) $st->fetchColumn() === 0) {
+            $ins = $pdo->prepare("INSERT INTO capas (nombre, activa) VALUES (?, 1)");
+            $ins->execute([$nombre]);
         }
     }
 }
@@ -256,6 +289,24 @@ function crear_reporte($d) {
     return (int) db()->lastInsertId();
 }
 
+function guardar_imagen_reporte($reporte_id, $archivo) {
+    $st = db()->prepare("INSERT INTO reporte_imagenes (reporte_id, archivo, creado) VALUES (?, ?, ?)");
+    $st->execute([(int) $reporte_id, $archivo, date('d/m/Y H:i')]);
+    return (int) db()->lastInsertId();
+}
+
+function imagenes_reporte($reporte_id) {
+    $st = db()->prepare("SELECT id, archivo, creado FROM reporte_imagenes WHERE reporte_id = ? ORDER BY id");
+    $st->execute([(int) $reporte_id]);
+    return $st->fetchAll();
+}
+
+function contar_imagenes_reporte($reporte_id) {
+    $st = db()->prepare("SELECT COUNT(*) FROM reporte_imagenes WHERE reporte_id = ?");
+    $st->execute([(int) $reporte_id]);
+    return (int) $st->fetchColumn();
+}
+
 function actualizar_estado_reporte($id, $estado) {
     $validos = ['Nuevo', 'En revisión', 'En atención', 'Resuelto'];
     if (!in_array($estado, $validos, true)) {
@@ -311,7 +362,70 @@ function geo_reportes() {
 }
 
 function geo_alertas() {
-    return db()->query("SELECT id, nivel, tipo, lugar, tiempo, icon, lat, lon FROM alertas WHERE lat IS NOT NULL AND lon IS NOT NULL ORDER BY id")->fetchAll();
+    return db()->query("SELECT id, nivel, tipo, lugar, tiempo, icon, lat, lon, magnitud, profundidad, url, fuente, ref FROM alertas WHERE lat IS NOT NULL AND lon IS NOT NULL ORDER BY id")->fetchAll();
+}
+
+function alerta_por_ref($ref) {
+    $st = db()->prepare("SELECT id FROM alertas WHERE ref = ? LIMIT 1");
+    $st->execute([(string) $ref]);
+    $r = $st->fetch();
+    return $r ? (int) $r['id'] : null;
+}
+
+function crear_alerta_externa($d) {
+    $st = db()->prepare("INSERT INTO alertas (nivel, tipo, lugar, tiempo, icon, lat, lon, ref, magnitud, profundidad, url, fuente, evento)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $st->execute([
+        $d['nivel'], $d['tipo'], $d['lugar'], $d['tiempo'], $d['icon'],
+        $d['lat'] ?? null, $d['lon'] ?? null, $d['ref'] ?? null,
+        $d['magnitud'] ?? null, $d['profundidad'] ?? null,
+        $d['url'] ?? null, $d['fuente'] ?? null, $d['evento'] ?? null,
+    ]);
+    return (int) db()->lastInsertId();
+}
+
+function actualizar_alerta_externa($id, $d) {
+    $st = db()->prepare("UPDATE alertas SET nivel = ?, tipo = ?, lugar = ?, tiempo = ?, icon = ?, lat = ?, lon = ?,
+        magnitud = ?, profundidad = ?, url = ?, fuente = ?, evento = ? WHERE id = ?");
+    $st->execute([
+        $d['nivel'], $d['tipo'], $d['lugar'], $d['tiempo'], $d['icon'],
+        $d['lat'] ?? null, $d['lon'] ?? null,
+        $d['magnitud'] ?? null, $d['profundidad'] ?? null,
+        $d['url'] ?? null, $d['fuente'] ?? null, $d['evento'] ?? null,
+        (int) $id,
+    ]);
+    return $st->rowCount() > 0;
+}
+
+function guardar_alerta_externa($d) {
+    $id = alerta_por_ref($d['ref'] ?? '');
+    if ($id) {
+        actualizar_alerta_externa($id, $d);
+        return ['accion' => 'update', 'id' => $id];
+    }
+    return ['accion' => 'insert', 'id' => crear_alerta_externa($d)];
+}
+
+function podar_alertas_externas($dias = 30) {
+    $st = db()->prepare("DELETE FROM alertas WHERE ref IS NOT NULL AND evento IS NOT NULL AND datetime(evento) < datetime('now', ?)");
+    $st->execute(['-' . max(1, (int) $dias) . ' days']);
+    return $st->rowCount();
+}
+
+function contar_alertas_externas() {
+    return (int) db()->query("SELECT COUNT(*) FROM alertas WHERE ref IS NOT NULL")->fetchColumn();
+}
+
+function sync_state_get($nombre) {
+    $st = db()->prepare("SELECT valor, actualizado FROM sync_state WHERE nombre = ?");
+    $st->execute([(string) $nombre]);
+    return $st->fetch() ?: null;
+}
+
+function sync_state_set($nombre, $valor) {
+    $st = db()->prepare("INSERT INTO sync_state (nombre, valor, actualizado) VALUES (?, ?, ?)
+        ON CONFLICT(nombre) DO UPDATE SET valor = excluded.valor, actualizado = excluded.actualizado");
+    $st->execute([(string) $nombre, (string) $valor, date('Y-m-d H:i:s')]);
 }
 
 function geo_albergues() {

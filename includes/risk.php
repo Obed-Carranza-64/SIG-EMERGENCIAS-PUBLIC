@@ -4,6 +4,7 @@ function risk_scale() {
     return [
         ['key' => 'incendio',      'valor' => 0.50, 'label' => 'Incendio forestal'],
         ['key' => 'deslizamiento', 'valor' => 0.50, 'label' => 'Deslizamiento de tierra'],
+        ['key' => 'sismo',         'valor' => 0.50, 'label' => 'Sismo / Terremoto'],
         ['key' => 'inundacion',    'valor' => 0.40, 'label' => 'Inundación'],
         ['key' => 'vivienda',      'valor' => 0.35, 'label' => 'Vivienda dañada'],
         ['key' => 'lluvia',        'valor' => 0.20, 'label' => 'Lluvias intensas'],

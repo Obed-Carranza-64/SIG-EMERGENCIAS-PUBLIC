@@ -73,6 +73,7 @@ $CAPAS = [
     ['n' => 'Incendios forestales',      'on' => true],
     ['n' => 'Inundaciones',              'on' => true],
     ['n' => 'Deslizamientos',            'on' => true],
+    ['n' => 'Sismos',                    'on' => true],
     ['n' => 'Red de comunicación',       'on' => true],
     ['n' => 'Recursos y albergues',      'on' => false],
     ['n' => 'Límites territoriales',     'on' => false],
