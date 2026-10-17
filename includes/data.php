@@ -9,7 +9,7 @@ $APP = [
 
 $NAV = [
     ['id' => 'inicio',   'label' => 'Inicio',              'icon' => 'fa-house',            'href' => 'index.php'],
-    ['id' => 'mapa',     'label' => 'Mapa',                'icon' => 'fa-map',              'href' => 'mapa.php'],
+    ['id' => 'mapa',     'label' => 'Mapa de calor',       'icon' => 'fa-fire-flame-curved', 'href' => 'mapa.php'],
     ['id' => 'reportes', 'label' => 'Reportes Ciudadanos', 'icon' => 'fa-triangle-exclamation', 'href' => 'reportes.php'],
     ['id' => 'recursos', 'label' => 'Kits y Recursos',     'icon' => 'fa-toolbox',          'href' => 'recursos.php'],
     ['id' => 'coord',    'label' => 'Coordinación',        'icon' => 'fa-diagram-project',  'href' => 'coordinacion.php'],

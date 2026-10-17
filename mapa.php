@@ -1,49 +1,53 @@
 <?php
 require_once __DIR__ . '/includes/data.php';
+require_once __DIR__ . '/includes/mesh.php';
+require_once __DIR__ . '/includes/risk.php';
 $active = 'mapa';
-$page_title = 'Mapa';
+$page_title = 'Mapa de calor';
 
 $CAPA_KEYS = [
     'Zonas de riesgo' => 'riesgo',
-    'Incendios forestales' => 'incendios',
-    'Inundaciones' => 'inundaciones',
-    'Deslizamientos' => 'deslizamientos',
-    'Red de comunicación' => 'red',
-    'Recursos y albergues' => 'recursos',
     'Límites territoriales' => 'limites',
 ];
 
 try {
     $geo = ['reportes' => geo_reportes(), 'alertas' => geo_alertas(), 'albergues' => geo_albergues()];
+    $mesh_g = mesh_grafo();
+    $geo['nodos'] = $mesh_g['nodos'];
+    $geo['enlaces'] = $mesh_g['enlaces'];
+    $mesh_stats = mesh_stats();
     $target = null;
     if (isset($_GET['reporte'])) {
         $rep = obtener_reporte((int) $_GET['reporte']);
         if ($rep && $rep['lat'] !== null && $rep['lon'] !== null) {
-            $target = ['lat' => (float) $rep['lat'], 'lon' => (float) $rep['lon'], 'label' => $rep['titulo'] . ' — ' . $rep['lugar']];
+            $target = ['lat' => (float) $rep['lat'], 'lon' => (float) $rep['lon'], 'label' => $rep['titulo'] . ' — ' . $rep['lugar'], 'id' => (int) ($rep['id'] ?? 0), 'kind' => 'reporte'];
         }
     } elseif (isset($_GET['alerta'])) {
         $aid = (int) $_GET['alerta'];
         foreach ($geo['alertas'] as $ga) {
             if ((int) $ga['id'] === $aid) {
-                $target = ['lat' => (float) $ga['lat'], 'lon' => (float) $ga['lon'], 'label' => $ga['tipo'] . ' — ' . $ga['lugar']];
+                $target = ['lat' => (float) $ga['lat'], 'lon' => (float) $ga['lon'], 'label' => $ga['tipo'] . ' — ' . $ga['lugar'], 'id' => (int) $ga['id'], 'kind' => 'alerta'];
                 break;
             }
         }
     }
 } catch (Throwable $e) {
-    $geo = ['reportes' => [], 'alertas' => [], 'albergues' => []];
+    $geo = ['reportes' => [], 'alertas' => [], 'albergues' => [], 'nodos' => [], 'enlaces' => []];
+    $mesh_stats = ['total' => 0, 'activos' => 0, 'enlaces' => 0, 'aislados' => 0, 'rango' => 60];
     $target = null;
 }
 
 require __DIR__ . '/includes/header.php';
 ?>
 
+<div class="section-label" style="margin-top:4px"><i class="fa-solid fa-fire-flame-curved"></i> Mapa de calor · Vista de usuarios</div>
+
 <div class="grid cols-3">
   <div class="stack">
     <div class="panel layer-panel">
       <div class="panel-head"><h3><i class="fa-solid fa-layer-group"></i> Capas del mapa</h3></div>
       <?php foreach ($CAPAS as $c): ?>
-        <?php $lk = $CAPA_KEYS[$c['n']] ?? ''; ?>
+        <?php $lk = $CAPA_KEYS[$c['n']] ?? ''; if ($lk === '') { continue; } ?>
         <div class="layer" style="opacity:<?= $c['on'] ? '1' : '.55' ?>">
           <span><?= htmlspecialchars($c['n']) ?></span>
           <label class="switch">
@@ -55,37 +59,52 @@ require __DIR__ . '/includes/header.php';
     </div>
 
     <div class="panel">
+      <div class="panel-head"><h3><i class="fa-solid fa-circle-dot"></i> Filtro por radio</h3></div>
+      <div class="layer">
+        <span>Activar filtro</span>
+        <label class="switch">
+          <input type="checkbox" id="radiusToggle">
+          <span class="sl"></span>
+        </label>
+      </div>
+      <div class="field radius-field" style="margin:12px 0 8px">
+        <label for="radiusRange">Radio: <strong id="radiusVal">75</strong> km</label>
+        <input type="range" id="radiusRange" min="10" max="200" step="5" value="75">
+      </div>
+      <div class="meta-row"><i class="fa-solid fa-hand-pointer"></i> Con el filtro activo, haz clic en el mapa para fijar el centro del rango.</div>
+    </div>
+
+    <div class="panel">
       <div class="panel-head"><h3><i class="fa-solid fa-list"></i> Leyenda</h3></div>
       <div class="legend">
         <div class="li"><span class="sw" style="background:linear-gradient(135deg,#ff2d3f,#ff7a00)"></span> Zona de alto riesgo</div>
         <div class="li"><span class="sw" style="background:#f59e0b"></span> Zona de riesgo medio</div>
         <div class="li"><span class="sw" style="background:#2ecc71"></span> Zona de riesgo bajo</div>
+        <div class="li"><span class="sw" style="background:linear-gradient(90deg,#3b82f6,#f59e0b,#ff2d3f)"></span> Intensidad de calor (suma de riesgo)</div>
         <div class="li"><span class="sw" style="background:#3b82f6"></span> Límite municipal</div>
         <div class="li"><span class="ln" style="border-color:#8b5cf6"></span> Ríos</div>
         <div class="li"><span class="ln" style="border-color:#f59e0b"></span> Carreteras principales</div>
       </div>
-      <div class="section-label" style="margin:14px 2px 8px"><i class="fa-solid fa-shapes"></i> Simbología</div>
+      <div class="section-label" style="margin:14px 2px 8px"><i class="fa-solid fa-fire-flame-curved"></i> Clasificación de riesgo (0.1 – 0.5)</div>
       <div class="legend">
-        <div class="li"><span class="sig-prev" style="--c:#ff2d3f"><i class="fa-solid fa-fire"></i></span> Incendio forestal</div>
-        <div class="li"><span class="sig-prev" style="--c:#3b82f6"><i class="fa-solid fa-water"></i></span> Inundación</div>
-        <div class="li"><span class="sig-prev" style="--c:#f59e0b"><i class="fa-solid fa-hill-rockslide"></i></span> Deslizamiento</div>
-        <div class="li"><span class="sig-prev" style="--c:#2ecc71"><i class="fa-solid fa-tower-broadcast"></i></span> Nodo de red (activo)</div>
-        <div class="li"><span class="sig-prev" style="--c:#8b5cf6"><i class="fa-solid fa-house-chimney"></i></span> Albergue / recurso</div>
+        <?php foreach (risk_scale() as $rs): ?>
+          <div class="li">
+            <span class="chip risk-chip" style="--c:<?= risk_color($rs['valor']) ?>"><?= rtrim(rtrim(number_format($rs['valor'], 2, '.', ''), '0'), '.') ?></span>
+            <?= htmlspecialchars($rs['label']) ?>
+          </div>
+        <?php endforeach; ?>
       </div>
+      <div class="meta-row" style="margin-top:8px"><i class="fa-solid fa-plus"></i> Los valores se suman por zona para formar el mapa de calor.</div>
     </div>
 
-    <div class="panel">
-      <div class="panel-head"><h3><i class="fa-solid fa-tower-broadcast"></i> Estado de la red mesh</h3></div>
-      <div class="meta-row"><span class="dot-g"></span> <strong style="color:#8ff0b4">15 / 15 nodos activos</strong></div>
-    </div>
   </div>
 
   <div class="map-wrap">
-    <div id="mapFull" class="map"></div>
+    <div id="mapCalor" class="map"></div>
     <div class="map-search">
       <div class="input-icon">
         <i class="fa-solid fa-magnifying-glass"></i>
-        <input type="text" data-osm-search data-osm-target="mapFull" placeholder="Buscar ubicación..." autocomplete="off">
+        <input type="text" data-osm-search data-osm-target="mapCalor" placeholder="Buscar ubicación..." autocomplete="off">
       </div>
       <div class="osm-results"></div>
     </div>
@@ -112,7 +131,7 @@ require __DIR__ . '/includes/header.php';
       </div>
       <div class="list">
         <?php foreach ($ALERTAS as $al): ?>
-          <a class="row js-alerta" data-nivel="<?= $al['nivel'] ?>" href="mapa.php?alerta=<?= (int)($al['id'] ?? 0) ?>">
+          <a class="row js-alerta" data-nivel="<?= $al['nivel'] ?>" href="reportes.php?alerta=<?= (int)($al['id'] ?? 0) ?>">
             <div class="ic <?= $al['nivel'] === 'baja' ? 'green' : ($al['nivel'] === 'media' ? 'amber' : 'red') ?>"><i class="fa-solid <?= htmlspecialchars($al['icon']) ?>"></i></div>
             <div class="txt"><strong><?= htmlspecialchars($al['tipo']) ?></strong><small><i class="fa-solid fa-location-dot"></i> <?= htmlspecialchars($al['lugar']) ?></small></div>
             <span class="time"><?= htmlspecialchars($al['tiempo']) ?></span>
@@ -184,6 +203,7 @@ require __DIR__ . '/includes/header.php';
 </div>
 
 <script>
+window.MAP_ID = 'mapCalor';
 window.GEO = <?= json_encode($geo, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 window.MAP_TARGET = <?= $target ? json_encode($target, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null' ?>;
 </script>

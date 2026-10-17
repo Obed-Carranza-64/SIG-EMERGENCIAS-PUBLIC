@@ -21,6 +21,7 @@ $TOASTS = [
     'kit' => ['ok' => true, 'msg' => 'Kit registrado correctamente.'],
     'asignado' => ['ok' => true, 'msg' => 'Kit asignado (En uso).'],
     'liberado' => ['ok' => true, 'msg' => 'Kit liberado (Disponible).'],
+    'nodo' => ['ok' => true, 'msg' => 'Estado del nodo actualizado. Topología recalculada.'],
 ];
 $toast = null;
 if (isset($_GET['ok']) && isset($TOASTS[$_GET['ok']])) {

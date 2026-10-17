@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/risk.php';
 
 function project_root() {
     return dirname(__DIR__);
@@ -73,5 +74,7 @@ function sig_config() {
         'mapCenterLon' => (float) env('MAP_CENTER_LON', -88.8965),
         'mapZoom' => (int) env('MAP_ZOOM', 8),
         'mapHeatZoom' => (int) env('MAP_HEAT_ZOOM', 9),
+        'riskScale' => risk_scale_map(),
+        'riskMin' => risk_min(),
     ];
 }

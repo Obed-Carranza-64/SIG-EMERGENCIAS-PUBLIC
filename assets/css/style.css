@@ -410,6 +410,33 @@ a.row{color:inherit}
 .pop-head{display:flex;align-items:center;gap:8px;margin-bottom:3px}
 .pop-head i{font-size:14px}
 
+/* ---------- Red mesh ---------- */
+.batt{height:6px;background:#232e3d;border-radius:99px;overflow:hidden;margin-top:6px}
+.batt span{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#2ecc71,#a3e635)}
+.batt.low span{background:linear-gradient(90deg,#f59e0b,#ff2d3f)}
+.route-path{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0}
+.route-path .hop{background:var(--panel-3);border:1px solid var(--border-2);border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600}
+.route-path .hop.start{border-color:rgba(46,204,113,.55)}
+.route-path .hop.end{border-color:rgba(255,45,63,.55)}
+.route-path > i{color:var(--muted-2);font-size:11px}
+
+/* ---------- Filtro por radio ---------- */
+.radius-field input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:6px;padding:0;border:none;
+  border-radius:99px;background:linear-gradient(90deg,#3b82f6,var(--amber),var(--red-2));outline:none;cursor:pointer;
+}
+.radius-field input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+  background:#fff;border:2px solid var(--red-2);box-shadow:0 2px 6px rgba(0,0,0,.55);cursor:pointer;
+}
+.radius-field input[type=range]::-moz-range-thumb{
+  width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid var(--red-2);cursor:pointer;
+}
+.radius-field label strong{color:var(--red-2)}
+.risk-chip{min-width:38px;justify-content:center;color:var(--c,#8b98ab);border-color:var(--c);font-weight:700;font-variant-numeric:tabular-nums}
+.risk-bar{height:8px;background:#232e3d;border-radius:99px;overflow:hidden;margin-top:6px}
+.risk-bar span{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#3b82f6,#f59e0b,#ff2d3f)}
+
 /* ---------- Responsive ---------- */
 @media (max-width:1250px){
   .cols-3{grid-template-columns:270px 1fr}

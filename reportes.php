@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/data.php';
+require_once __DIR__ . '/includes/mesh.php';
 
 function estado_key($e) {
     return ['Nuevo' => 'nuevo', 'En revisión' => 'revision', 'En atención' => 'atencion', 'Resuelto' => 'resuelto'][$e] ?? 'nuevo';
@@ -23,6 +24,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reporte_id'], $_POST[
 $active = 'reportes';
 $page_title = 'Reportes Ciudadanos';
 
+$CAPA_KEYS = [
+    'Incendios forestales' => 'incendios',
+    'Inundaciones' => 'inundaciones',
+    'Deslizamientos' => 'deslizamientos',
+    'Red de comunicación' => 'red',
+    'Recursos y albergues' => 'recursos',
+    'Límites territoriales' => 'limites',
+];
+
 try {
     $conteo = conteo_reportes();
     $ver = isset($_GET['ver']) ? (int) $_GET['ver'] : 0;
@@ -30,11 +40,30 @@ try {
     if (!$destacado) {
         $destacado = reporte_destacado();
     }
-    $geo_reportes = geo_reportes();
+
+    $geo = ['reportes' => geo_reportes(), 'alertas' => geo_alertas(), 'albergues' => geo_albergues()];
+    $mesh_g = mesh_grafo();
+    $geo['nodos'] = $mesh_g['nodos'];
+    $geo['enlaces'] = $mesh_g['enlaces'];
+
+    $target = null;
+    if (isset($_GET['alerta'])) {
+        $aid = (int) $_GET['alerta'];
+        foreach ($geo['alertas'] as $ga) {
+            if ((int) $ga['id'] === $aid) {
+                $target = ['lat' => (float) $ga['lat'], 'lon' => (float) $ga['lon'], 'label' => $ga['tipo'] . ' — ' . $ga['lugar'], 'id' => (int) $ga['id'], 'kind' => 'alerta'];
+                break;
+            }
+        }
+    }
+    if (!$target && $ver > 0 && $destacado && $destacado['lat'] !== null && $destacado['lon'] !== null) {
+        $target = ['lat' => (float) $destacado['lat'], 'lon' => (float) $destacado['lon'], 'label' => $destacado['titulo'] . ' — ' . $destacado['lugar'], 'id' => (int) ($destacado['id'] ?? 0), 'kind' => 'reporte'];
+    }
 } catch (Throwable $e) {
     $conteo = ['todos' => 0, 'nuevo' => 0, 'revision' => 0, 'atencion' => 0, 'resuelto' => 0];
     $destacado = null;
-    $geo_reportes = [];
+    $geo = ['reportes' => [], 'alertas' => [], 'albergues' => [], 'nodos' => [], 'enlaces' => []];
+    $target = null;
 }
 if (!$destacado && !empty($REPORTES)) {
     $destacado = $REPORTES[0] + ['id' => 0, 'lat' => null, 'lon' => null];
@@ -50,12 +79,25 @@ require __DIR__ . '/includes/header.php';
     <div class="panel">
       <div class="side-nav">
         <a href="index.php"><i class="fa-solid fa-house"></i> Inicio</a>
-        <a href="mapa.php"><i class="fa-solid fa-map"></i> Mapa</a>
+        <a href="mapa.php"><i class="fa-solid fa-fire-flame-curved"></i> Mapa de calor</a>
         <a class="is-active" href="reportes.php"><i class="fa-solid fa-triangle-exclamation"></i> Reportes Ciudadanos</a>
         <a href="recursos.php"><i class="fa-solid fa-toolbox"></i> Kits y Recursos</a>
         <a href="coordinacion.php"><i class="fa-solid fa-diagram-project"></i> Coordinación</a>
       </div>
       <a class="btn btn-red btn-block" style="margin-top:14px" href="reportar.php"><i class="fa-solid fa-triangle-exclamation"></i> Reportar emergencia</a>
+    </div>
+    <div class="panel layer-panel">
+      <div class="panel-head"><h3><i class="fa-solid fa-layer-group"></i> Capas del mapa</h3></div>
+      <?php foreach ($CAPAS as $c): ?>
+        <?php $lk = $CAPA_KEYS[$c['n']] ?? ''; if ($lk === '') { continue; } ?>
+        <div class="layer" style="opacity:<?= $c['on'] ? '1' : '.55' ?>">
+          <span><?= htmlspecialchars($c['n']) ?></span>
+          <label class="switch">
+            <input type="checkbox" data-layer="<?= $lk ?>" <?= $c['on'] ? 'checked' : '' ?>>
+            <span class="sl"></span>
+          </label>
+        </div>
+      <?php endforeach; ?>
     </div>
     <div class="panel" style="background:linear-gradient(180deg,rgba(226,31,46,.16),var(--panel-2));border-color:rgba(255,45,63,.3)">
       <div style="display:flex;gap:12px">
@@ -110,13 +152,21 @@ require __DIR__ . '/includes/header.php';
         <?php endforeach; ?>
       </div>
 
-      <div class="map-wrap" style="min-height:520px;grid-column:span 2">
+      <div class="map-wrap" style="grid-column:span 2;align-self:start;height:calc(100vh - 250px);min-height:520px">
         <div id="mapReportes" class="map" style="min-height:520px"></div>
+        <div class="map-search">
+          <div class="input-icon">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" data-osm-search data-osm-target="mapReportes" placeholder="Buscar ubicación..." autocomplete="off">
+          </div>
+          <div class="osm-results"></div>
+        </div>
         <div class="map-tools">
           <button class="map-tool" data-map-action="zoom-in"><i class="fa-solid fa-plus"></i></button>
           <button class="map-tool" data-map-action="zoom-out"><i class="fa-solid fa-minus"></i></button>
           <button class="map-tool" data-map-action="locate"><i class="fa-solid fa-crosshairs"></i></button>
           <button class="map-tool" data-map-action="theme" title="Tema claro / oscuro"><i class="fa-solid fa-circle-half-stroke"></i></button>
+          <button class="map-tool" data-map-action="expand"><i class="fa-solid fa-expand"></i></button>
         </div>
         <div class="map-coords"><i class="fa-solid fa-map"></i> Haz clic en el mapa para ver la dirección</div>
       </div>
@@ -155,7 +205,7 @@ require __DIR__ . '/includes/header.php';
         </form>
 
         <?php if (!empty($destacado['lat']) && !empty($destacado['lon'])): ?>
-          <a class="btn btn-ghost btn-block" style="margin-top:10px" href="mapa.php?reporte=<?= (int)$destacado['id'] ?>"><i class="fa-solid fa-map"></i> Ver en el mapa</a>
+          <a class="btn btn-ghost btn-block" style="margin-top:10px" href="reportes.php?ver=<?= (int)($destacado['id'] ?? 0) ?>"><i class="fa-solid fa-map"></i> Centrar en el mapa</a>
         <?php endif; ?>
       </div>
     </div>
@@ -163,7 +213,9 @@ require __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-window.GEO_REPORTES = <?= json_encode($geo_reportes, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+window.MAP_ID = 'mapReportes';
+window.GEO = <?= json_encode($geo, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+window.MAP_TARGET = <?= $target ? json_encode($target, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null' ?>;
 </script>
 
 <?php require __DIR__ . '/includes/footer.php'; ?>

@@ -12,6 +12,11 @@
   var NOM_EXTRA = CFG.nominatimCountry ? '&countrycodes=' + encodeURIComponent(CFG.nominatimCountry) : '';
   var ZOOM = CFG.mapZoom || 8;
   var ZOOM_HEAT = CFG.mapHeatZoom || 9;
+  var RISK_SCALE = CFG.riskScale || {
+    incendio: 0.5, deslizamiento: 0.5, inundacion: 0.4,
+    vivienda: 0.35, lluvia: 0.2, carretera: 0.1, arbol: 0.15
+  };
+  var RISK_MIN = typeof CFG.riskMin === 'number' ? CFG.riskMin : 0.1;
   var MAPS = {};
 
   /* ---------------- Mapas / tiles OpenStreetMap ---------------- */
@@ -75,10 +80,12 @@
 
     if (opts.heat) {
       map._heatLayer = L.heatLayer(heatPoints(), {
-        radius: 34,
-        blur: 30,
-        maxZoom: 12,
-        gradient: { 0.2: '#3b82f6', 0.4: '#f59e0b', 0.6: '#ff5a2d', 0.85: '#e21f2e', 1.0: '#ff1447' }
+        radius: 40,
+        blur: 34,
+        maxZoom: 11,
+        max: 1.0,
+        minOpacity: 0.15,
+        gradient: { 0.15: '#1e3a8a', 0.35: '#3b82f6', 0.55: '#f59e0b', 0.75: '#ff7a00', 0.9: '#ff2d3f', 1.0: '#c0121f' }
       });
       map._heatLayer.addTo(map);
     }
@@ -91,6 +98,13 @@
     }
 
     MAPS[id] = map;
+
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(function () { map.invalidateSize(); });
+      ro.observe(map.getContainer());
+      map._ro = ro;
+    }
+
     if (opts.interactive !== false) {
       initMapTools(map);
       if (opts.geocode !== false) {
@@ -126,13 +140,49 @@
   function locateUser(map) {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(function (pos) {
-      var ll = [pos.coords.latitude, pos.coords.longitude];
-      map.setView(ll, 14);
-      L.marker(ll, { icon: sigUser() })
-        .addTo(map).bindPopup('Tu ubicación').openPopup();
+      focusPoint(map, pos.coords.latitude, pos.coords.longitude, 'Tu ubicación', { zoom: 15, marker: sigUser() });
     }, function () {
       alert('No se pudo obtener tu ubicación.');
     });
+  }
+
+  /* Centra el mapa en un punto. Reutiliza el marcador original si se pasa en opts.existing,
+     de modo que no se pierde la información del marcador (icono + popup). */
+  function focusPoint(map, lat, lon, label, opts) {
+    opts = opts || {};
+    var zoom = opts.zoom || 14;
+    var mk = opts.existing;
+    if (!mk) {
+      var icon = opts.marker || sigPin(opts.icon || 'fa-location-dot', opts.color || '#ff2d3f');
+      mk = L.marker([lat, lon], { icon: icon }).addTo(map);
+      if (label) {
+        mk.bindPopup('<strong>' + esc(label) + '</strong>', { autoPan: false, offset: [0, -2] });
+      }
+    }
+    if (mk && mk.getLatLng) {
+      var ll = mk.getLatLng();
+      lat = ll.lat;
+      lon = ll.lng;
+    }
+    function center() {
+      map.invalidateSize();
+      map.setView([lat, lon], zoom, { animate: false });
+      var p = map.latLngToContainerPoint([lat, lon]);
+      var size = map.getSize();
+      var dx = p.x - size.x / 2;
+      var dy = p.y - size.y / 2;
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+        map.panBy([dx, dy], { animate: false });
+      }
+    }
+    center();
+    if (mk && mk.getPopup && mk.getPopup()) { mk.openPopup({ autoPan: false }); }
+    if (window.requestAnimationFrame) { requestAnimationFrame(center); }
+    setTimeout(center, 150);
+    setTimeout(center, 400);
+    setTimeout(center, 800);
+    window.addEventListener('load', center, { once: true });
+    return mk;
   }
 
   function toggleFullscreen(wrap) {
@@ -289,8 +339,116 @@
     return m;
   }
 
+  function haversine(lat1, lon1, lat2, lon2) {
+    var R = 6371, rad = Math.PI / 180;
+    var dLat = (lat2 - lat1) * rad;
+    var dLon = (lon2 - lon1) * rad;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+      + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+  }
+
+  function normalizeText(s) {
+    s = String(s === null || s === undefined ? '' : s).toLowerCase();
+    if (s.normalize) {
+      s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+    return s;
+  }
+
+  function riskValue(text) {
+    var t = normalizeText(text);
+    var best = RISK_MIN;
+    for (var k in RISK_SCALE) {
+      if (t.indexOf(normalizeText(k)) > -1 && RISK_SCALE[k] > best) {
+        best = RISK_SCALE[k];
+      }
+    }
+    return best;
+  }
+
+  function geoHeatPoints(geo) {
+    var pts = [];
+    function add(lat, lon, v) {
+      if (lat === null || lat === undefined || lon === null || lon === undefined) return;
+      pts.push([parseFloat(lat), parseFloat(lon), v]);
+    }
+    (geo.reportes || []).forEach(function (r) { add(r.lat, r.lon, riskValue(r.titulo)); });
+    (geo.alertas || []).forEach(function (a) { add(a.lat, a.lon, riskValue(a.tipo)); });
+    return pts;
+  }
+
+  function applyRadius(map) {
+    var filtrable = map._filtrable || [];
+    var heatBase = map._heatBase || [];
+
+    if (!map._radiusActive) {
+      filtrable.forEach(function (f) {
+        if (!f.group.hasLayer(f.m)) { f.group.addLayer(f.m); }
+      });
+      if (map._heatLayer && heatBase.length) { map._heatLayer.setLatLngs(heatBase); }
+      if (map._radiusCircle) { map.removeLayer(map._radiusCircle); map._radiusCircle = null; }
+      return;
+    }
+
+    var c = map._radiusCenter;
+    var km = map._radiusKm;
+    var heat = [];
+    filtrable.forEach(function (f) {
+      var inside = haversine(c.lat, c.lng, f.lat, f.lon) <= km;
+      if (inside && !f.group.hasLayer(f.m)) { f.group.addLayer(f.m); }
+      if (!inside && f.group.hasLayer(f.m)) { f.group.removeLayer(f.m); }
+    });
+    heatBase.forEach(function (p) {
+      if (haversine(c.lat, c.lng, p[0], p[1]) <= km) { heat.push(p); }
+    });
+    if (map._heatLayer) { map._heatLayer.setLatLngs(heat); }
+    if (!map._radiusCircle) {
+      map._radiusCircle = L.circle(c, {
+        radius: km * 1000, color: '#3b82f6', weight: 2, dashArray: '5 6',
+        fill: true, fillColor: '#3b82f6', fillOpacity: 0.06
+      }).addTo(map);
+    } else {
+      map._radiusCircle.setLatLng(c).setRadius(km * 1000);
+    }
+  }
+
+  function initRadiusFilter() {
+    var toggle = document.getElementById('radiusToggle');
+    var range = document.getElementById('radiusRange');
+    var val = document.getElementById('radiusVal');
+    var map = MAPS[mainMapId()];
+    if (!toggle || !range || !map) return;
+
+    map._radiusActive = false;
+    map._radiusKm = parseFloat(range.value) || 75;
+    map._radiusCenter = L.latLng(SALVADOR[0], SALVADOR[1]);
+
+    toggle.addEventListener('change', function () {
+      map._radiusActive = toggle.checked;
+      applyRadius(map);
+      if (map._radiusActive) {
+        showToast('Filtro por radio activo · ' + map._radiusKm + ' km', true);
+      }
+    });
+    range.addEventListener('input', function () {
+      map._radiusKm = parseFloat(range.value) || 75;
+      if (val) val.textContent = range.value;
+      if (map._radiusActive) { applyRadius(map); }
+    });
+    map.on('click', function (e) {
+      if (!map._radiusActive) return;
+      map._radiusCenter = e.latlng;
+      applyRadius(map);
+    });
+  }
+
+  function mainMapId() {
+    return window.MAP_ID || 'mapFull';
+  }
+
   function initGeoLayers() {
-    var map = MAPS.mapFull;
+    var map = MAPS[mainMapId()];
     var geo = window.GEO;
     if (!map || !geo || !window.L) return;
 
@@ -307,32 +465,44 @@
       groups.riesgo.addLayer(map._heatLayer);
     }
 
+    var filtrable = [];
+    var markerIndex = {};
+    function keep(mk, group, src) {
+      if (mk) {
+        filtrable.push({ m: mk, lat: parseFloat(src.lat), lon: parseFloat(src.lon), group: group });
+      }
+    }
+
     (geo.alertas || []).forEach(function (a) {
+      var g = groups[tipoKey(a.tipo)];
       var c = alertColor(a.nivel);
-      geoMarker(groups[tipoKey(a.tipo)], a.lat, a.lon, sigPin(a.icon, c),
-        popHead(a.icon || 'fa-triangle-exclamation', c, a.tipo) + esc(a.lugar) + '<br><small>' + esc(a.tiempo) + '</small>');
+      var mk = geoMarker(g, a.lat, a.lon, sigPin(a.icon, c),
+        popHead(a.icon || 'fa-triangle-exclamation', c, a.tipo) + esc(a.lugar) + '<br><small>' + esc(a.tiempo) + ' · riesgo ' + riskValue(a.tipo) + '</small>');
+      if (mk && a.id !== undefined && a.id !== null) { markerIndex['alerta-' + a.id] = { m: mk, g: g }; }
+      keep(mk, g, a);
     });
 
     (geo.reportes || []).forEach(function (r) {
+      var g = groups[tipoKey(r.titulo)];
       var c = r.estado === 'Resuelto' ? '#2ecc71' : (r.estado === 'En atención' ? '#3b82f6' : '#ff2d3f');
-      geoMarker(groups[tipoKey(r.titulo)], r.lat, r.lon, sigPin(r.icon, c),
-        popHead(r.icon || 'fa-bullhorn', c, r.titulo) + esc(r.lugar) + '<br><small>' + esc(r.estado) + ' · ' + esc(r.tiempo) + '</small>');
+      var mk = geoMarker(g, r.lat, r.lon, sigPin(r.icon, c),
+        popHead(r.icon || 'fa-bullhorn', c, r.titulo) + esc(r.lugar) + '<br><small>' + esc(r.estado) + ' · ' + esc(r.tiempo) + ' · riesgo ' + riskValue(r.titulo) + '</small>');
+      if (mk && r.id !== undefined && r.id !== null) { markerIndex['reporte-' + r.id] = { m: mk, g: g }; }
+      keep(mk, g, r);
     });
 
-    NODES.forEach(function (n, i) {
-      L.marker([n[0], n[1]], { icon: sigDot('fa-tower-broadcast', '#2ecc71') })
-        .bindPopup(popHead('fa-tower-broadcast', '#2ecc71', n[2]) + 'Nodo activo').addTo(groups.red);
-      if (i > 0) {
-        L.polyline([[NODES[0][0], NODES[0][1]], [n[0], n[1]]], { color: '#2ecc71', weight: 1, dashArray: '4 4', opacity: 0.6 }).addTo(groups.red);
-      }
-    });
+    drawMesh(map, groups.red, geo, null, { links: false });
 
     (geo.albergues || []).forEach(function (a) {
-      geoMarker(groups.recursos, a.lat, a.lon, sigDot('fa-house-chimney', '#3b82f6'),
-        popHead('fa-house-chimney', '#3b82f6', a.n) + esc(a.cap) + '<br><small>' + esc(a.estado) + '</small>');
+      keep(geoMarker(groups.recursos, a.lat, a.lon, sigDot('fa-house-chimney', '#3b82f6'),
+        popHead('fa-house-chimney', '#3b82f6', a.n) + esc(a.cap) + '<br><small>' + esc(a.estado) + '</small>'), groups.recursos, a);
     });
 
     L.rectangle([[12.9, -90.2], [14.5, -87.6]], { color: '#3b82f6', weight: 2, dashArray: '6 6', fill: false }).addTo(groups.limites);
+
+    map._filtrable = filtrable;
+    map._heatBase = geoHeatPoints(geo);
+    if (map._heatLayer && map._heatBase.length) { map._heatLayer.setLatLngs(map._heatBase); }
 
     document.querySelectorAll('.layer .switch input[data-layer]').forEach(function (sw) {
       var g = groups[sw.getAttribute('data-layer')];
@@ -347,20 +517,83 @@
 
     if (window.MAP_TARGET) {
       var t = window.MAP_TARGET;
-      map.setView([t.lat, t.lon], 13);
-      L.marker([t.lat, t.lon], { icon: sigPin('fa-location-dot', '#ff2d3f') }).addTo(map).bindPopup('<strong>' + esc(t.label) + '</strong>').openPopup();
+      var ref = (t.kind && t.id !== undefined && t.id !== null) ? markerIndex[t.kind + '-' + t.id] : null;
+      if (ref) {
+        if (!map.hasLayer(ref.g)) { ref.g.addTo(map); }
+        focusPoint(map, t.lat, t.lon, t.label, { zoom: 14, existing: ref.m });
+      } else {
+        focusPoint(map, t.lat, t.lon, t.label, { zoom: 14 });
+      }
     }
   }
 
-  function initReportesMap() {
-    var map = MAPS.mapReportes;
-    var data = window.GEO_REPORTES;
-    if (!map || !data || !window.L) return;
-    data.forEach(function (r) {
-      var c = r.estado === 'Resuelto' ? '#2ecc71' : (r.estado === 'En atención' ? '#3b82f6' : '#ff2d3f');
-      geoMarker(map, r.lat, r.lon, sigPin(r.icon, c),
-        popHead(r.icon || 'fa-bullhorn', c, r.titulo) + esc(r.lugar) + '<br><small>' + esc(r.estado) + '</small>');
+  function meshNodeList(geo) {
+    if (geo.nodos && geo.nodos.length) return geo.nodos;
+    return NODES.map(function (n, i) {
+      return { id: -(i + 1), nombre: n[2], lat: n[0], lon: n[1], tipo: 'repetidor', estado: 'activo', bateria: 100 };
     });
+  }
+
+  function drawMesh(map, group, geo, onNode, opts) {
+    var drawLinks = !opts || opts.links !== false;
+    var nodos = meshNodeList(geo);
+    var byId = {};
+    nodos.forEach(function (n) {
+      byId[n.id] = n;
+      var act = n.estado === 'activo';
+      var col = act ? '#2ecc71' : '#5b6779';
+      var m = L.marker([parseFloat(n.lat), parseFloat(n.lon)], { icon: sigDot('fa-tower-broadcast', col) })
+        .bindPopup(popHead('fa-tower-broadcast', col, n.nombre) + esc(n.tipo || '') + ' · ' + (act ? 'Nodo activo' : 'Nodo inactivo'))
+        .addTo(group);
+      if (onNode) {
+        (function (nn) { m.on('click', function () { onNode(nn); }); })(n);
+      }
+    });
+    var enlaces = geo.enlaces || [];
+    if (drawLinks) {
+      if (!enlaces.length && !geo.nodos) {
+        for (var i = 1; i < nodos.length; i++) {
+          L.polyline([[nodos[0].lat, nodos[0].lon], [nodos[i].lat, nodos[i].lon]], { color: '#2ecc71', weight: 1, dashArray: '4 4', opacity: 0.6 }).addTo(group);
+        }
+      } else {
+        enlaces.forEach(function (e) {
+          var a = byId[e[0]] || byId[String(e[0])];
+          var b = byId[e[1]] || byId[String(e[1])];
+          if (!a || !b) return;
+          var col = e[3] === 'fuerte' ? '#2ecc71' : (e[3] === 'media' ? '#f59e0b' : '#ff2d3f');
+          L.polyline([[a.lat, a.lon], [b.lat, b.lon]], { color: col, weight: 2, opacity: 0.75 }).addTo(group);
+        });
+      }
+    }
+    return byId;
+  }
+
+  function initMeshPage() {
+    var el = document.getElementById('meshMap');
+    if (!el || !window.L || !window.MESH) return;
+    var map = initMap('meshMap', { zoom: ZOOM_HEAT, heat: false, geocode: false });
+    if (!map) return;
+    var group = L.layerGroup().addTo(map);
+    var byId = drawMesh(map, group, window.MESH, function (n) {
+      var sel = document.getElementById('routeOrigen');
+      if (sel) sel.value = String(n.id);
+      showToast('Origen: ' + n.nombre, true);
+    });
+    var route = window.MESH_ROUTE;
+    if (route && route.path && route.path.length > 1) {
+      var pts = [];
+      route.path.forEach(function (id) {
+        var n = byId[id] || byId[String(id)];
+        if (n) pts.push([parseFloat(n.lat), parseFloat(n.lon)]);
+      });
+      if (pts.length > 1) {
+        L.polyline(pts, { color: '#ff2d3f', weight: 4, opacity: 0.9 }).addTo(map);
+      }
+    }
+    var lls = (window.MESH.nodos || []).map(function (n) {
+      return [parseFloat(n.lat), parseFloat(n.lon)];
+    });
+    if (lls.length) map.fitBounds(lls, { padding: [30, 30] });
   }
 
   /* ---------------- Capas / tabs / filtros ---------------- */
@@ -563,18 +796,21 @@
     initTabs();
     initSearch();
     initGeoLayers();
-    initReportesMap();
     initAlertTabs();
     initKitTabs();
     initReportFilters();
     initKitModal();
     initToasts();
     initPicker();
+    initMeshPage();
+    initRadiusFilter();
   });
 
   function initMaps() {
     initMap('mapInicio', { zoom: ZOOM, heat: true, interactive: false, markers: [[13.4833, -88.1833, 'Volcán San Miguel']] });
     initMap('mapFull', { zoom: ZOOM_HEAT, heat: true });
-    initMap('mapReportes', { zoom: ZOOM_HEAT, heat: true });
+    initMap('mapCalor', { zoom: ZOOM_HEAT, heat: true });
+    initMap('mapAlertas', { zoom: ZOOM_HEAT, heat: false });
+    initMap('mapReportes', { zoom: ZOOM_HEAT, heat: false });
   }
 })();

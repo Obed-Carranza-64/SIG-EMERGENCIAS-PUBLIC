@@ -24,7 +24,7 @@ require __DIR__ . '/includes/header.php';
           <div class="txt"><strong><?= htmlspecialchars($al['tipo']) ?></strong><small><i class="fa-solid fa-location-dot"></i> <?= htmlspecialchars($al['lugar']) ?></small></div>
           <span class="badge <?= $al['nivel'] ?>"><?= ucfirst($al['nivel']) ?></span>
           <span class="time"><?= htmlspecialchars($al['tiempo']) ?></span>
-          <a class="btn btn-ghost btn-xs" href="mapa.php?alerta=<?= (int)($al['id'] ?? 0) ?>"><i class="fa-solid fa-map"></i> Ver en mapa</a>
+          <a class="btn btn-ghost btn-xs" href="reportes.php?alerta=<?= (int)($al['id'] ?? 0) ?>"><i class="fa-solid fa-map"></i> Ver en mapa</a>
         </div>
       <?php endforeach; ?>
     </div>

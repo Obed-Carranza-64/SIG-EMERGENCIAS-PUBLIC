@@ -67,6 +67,34 @@ function init_db() {
 
     seed_if_empty($pdo);
     migrar_coordenadas($pdo);
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS nodos_mesh (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL,
+        tipo TEXT NOT NULL DEFAULT 'repetidor',
+        estado TEXT NOT NULL DEFAULT 'activo',
+        bateria INTEGER NOT NULL DEFAULT 100
+    )");
+
+    if ((int) $pdo->query("SELECT COUNT(*) FROM nodos_mesh")->fetchColumn() === 0) {
+        $nodos = [
+            ['Nodo Central', 13.6929, -89.2182, 'central', 'activo', 100],
+            ['Nodo Santa Tecla', 13.6768, -89.2903, 'repetidor', 'activo', 87],
+            ['Nodo San Miguel', 13.4833, -88.1833, 'repetidor', 'activo', 76],
+            ['Nodo Santa Ana', 13.9942, -89.5597, 'repetidor', 'activo', 64],
+            ['Nodo Chalatenango', 14.0333, -88.9333, 'repetidor', 'activo', 92],
+            ['Nodo Usulután', 13.3500, -88.4400, 'repetidor', 'activo', 58],
+            ['Nodo Suchitoto', 13.9357, -89.0259, 'sensor', 'activo', 81],
+            ['Nodo La Unión', 13.3350, -87.8410, 'sensor', 'activo', 45],
+            ['Nodo San Vicente', 13.6447, -88.7853, 'repetidor', 'activo', 70],
+        ];
+        $st = $pdo->prepare("INSERT INTO nodos_mesh (nombre, lat, lon, tipo, estado, bateria) VALUES (?, ?, ?, ?, ?, ?)");
+        foreach ($nodos as $n) {
+            $st->execute($n);
+        }
+    }
 }
 
 function ensure_column($pdo, $tabla, $columna, $def) {
@@ -288,4 +316,21 @@ function geo_alertas() {
 
 function geo_albergues() {
     return db()->query("SELECT id, nombre AS n, distancia AS loc, capacidad AS cap, estado, lat, lon FROM albergues WHERE lat IS NOT NULL AND lon IS NOT NULL ORDER BY id")->fetchAll();
+}
+
+function mesh_nodos($solo_activos = false) {
+    $sql = "SELECT id, nombre, lat, lon, tipo, estado, bateria FROM nodos_mesh ORDER BY id";
+    if ($solo_activos) {
+        $sql = "SELECT id, nombre, lat, lon, tipo, estado, bateria FROM nodos_mesh WHERE estado = 'activo' ORDER BY id";
+    }
+    return db()->query($sql)->fetchAll();
+}
+
+function actualizar_estado_nodo($id, $estado) {
+    if (!in_array($estado, ['activo', 'inactivo'], true)) {
+        return false;
+    }
+    $st = db()->prepare("UPDATE nodos_mesh SET estado = ? WHERE id = ?");
+    $st->execute([$estado, (int) $id]);
+    return $st->rowCount() > 0;
 }
